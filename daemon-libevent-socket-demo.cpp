@@ -14,12 +14,12 @@
 #include <arpa/inet.h>
 #include <fcntl.h>
 #include <unistd.h>
-#include <memory>
-#include <cstdint>
-#include <iostream>
+// #include <memory>
+#include <stdint.h>
+// #include <iostream>
 
 
-#define SERVER_PORT 8080
+#define SERVER_PORT 8888
 int debug = 0;
 
 struct client {
@@ -54,15 +54,17 @@ void buf_read_callback(struct bufferevent *incoming, void *arg)
 
 void buf_write_callback(struct bufferevent *bev, void *arg)
 {
-
+  syslog(LOG_INFO, "write call back %d", bev->input);  
+//   struct evbuffer *evreturn;
+//   evreturn = evbuffer_new();
+//   evbuffer_add_printf(evreturn,"how can this happen");
+//   bufferevent_write_buffer(bev,evreturn);
+//   evbuffer_free(evreturn);
 }
 
 void buf_error_callback(struct bufferevent *bev, short what, void *arg)
 {
-  struct client *client = (struct client *)arg;
-  bufferevent_free(client->buf_ev);
-  close(client->fd);
-  free(client);
+  printf("error callback %d", what);
 }
 
 void accept_callback(int fd, short ev, void *arg)
@@ -75,16 +77,18 @@ void accept_callback(int fd, short ev, void *arg)
   client_fd = accept(fd, (struct sockaddr *)&client_addr, &client_len);
   if (client_fd < 0)
   {
-    // ("Client: accept() failed");
+    printf("Client: accept() failed");
     return;
   }
 
   setnonblock(client_fd);
 
   client = (struct client*)calloc(1, sizeof(*client));
-  if (client == NULL)
+  if (client == NULL) {
     // std::cout <<"malloc failed";
+    printf("malloc failure");
     client->fd = client_fd;
+  }
 
   client->buf_ev = bufferevent_new(client_fd,
    buf_read_callback,
@@ -95,7 +99,7 @@ void accept_callback(int fd, short ev, void *arg)
   bufferevent_enable(client->buf_ev, EV_READ);
 }
 
-int main(int argc, char **argv)
+int main(void)
 {
           /* Our process ID and Session ID */
 
@@ -104,13 +108,13 @@ int main(int argc, char **argv)
         /* Fork off the parent process */
   pid = fork();
   if (pid < 0) {
-    std::cout<<"Fork failure"<<std::endl; 
+    printf("Fork failure\n");
     exit(EXIT_FAILURE);
   }
         /* If we got a good PID, then
            we can exit the parent process. */
   if (pid > 0) {
-    std::cout<<"fork success"<<std::endl; 
+    printf("fork success\n");
     exit(EXIT_SUCCESS);
   }
 
@@ -145,7 +149,7 @@ int main(int argc, char **argv)
 
         /* Daemon-specific initialization goes here */
         /* The Big Loop */
-  while (1) {
+  // while (1) {
            /* Do some task here ... */
     syslog(LOG_INFO, "still running");
 
@@ -167,7 +171,7 @@ int main(int argc, char **argv)
     memset(&addresslisten, 0, sizeof(addresslisten));
 
     addresslisten.sin_family = AF_INET;
-    addresslisten.sin_port = htons(8888);
+    addresslisten.sin_port = htons(SERVER_PORT);
   // addresslisten.sin_addr.s_addr = INADDR_ANY;
     inet_aton("127.0.0.1", &addresslisten.sin_addr);
 
@@ -189,14 +193,13 @@ int main(int argc, char **argv)
     setnonblock(socketlisten);
 
     event_set(&accept_event, socketlisten, EV_READ|EV_PERSIST, accept_callback, NULL);
-
     event_add(&accept_event, NULL);
-    syslog(LOG_INFO, "begin dispathc");
+    syslog(LOG_INFO, "begin dispacth");
     event_dispatch();
 
     close(socketlisten);
     syslog(LOG_INFO, "exit success");
     closelog();
     exit(EXIT_SUCCESS);
-  }
+  // }
 }
