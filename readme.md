@@ -1,4 +1,5 @@
 # daemon-demo
+demo daemon service and daemon service using libevent
 start build a thing:
 
 gcc -std=c++11 -o daemon-libevent-socket-demo.out daemon-libevent-socket-demo.cpp  -lstdc++ -levent -levent_core
