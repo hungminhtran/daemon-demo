@@ -7,21 +7,21 @@
 #include <unistd.h>
 #include <syslog.h>
 #include <string.h> 
+#include <errno.h>
 
-#include <event.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <fcntl.h>
 #include <unistd.h>
-// #include <memory>
 #include <stdint.h>
-// #include <iostream>
 
+#include <event2/listener.h>
+#include <event2/bufferevent.h>
+#include <event2/buffer.h>
 
-#define SERVER_PORT 8888
 int debug = 0;
-
+int counter = 0;
 struct client {
   int fd;
   struct bufferevent *buf_ev;
@@ -36,92 +36,34 @@ int setnonblock(int fd)
   fcntl(fd, F_SETFL, flags);
 }
 
-void buf_read_callback(struct bufferevent *incoming, void *arg)
+void buf_read_callback(struct bufferevent *bev, void *arg)
 {
-  struct evbuffer *evreturn;
-  char *req;
-
-  req = evbuffer_readline(incoming->input);
-  if (req == NULL)
-    return;
-
-  evreturn = evbuffer_new();
-  evbuffer_add_printf(evreturn,"You said %s\n",req);
-  bufferevent_write_buffer(incoming,evreturn);
-  evbuffer_free(evreturn);
-  free(req);
+  syslog(LOG_INFO, "read callback %d", counter++);
 }
 
-void buf_write_callback(struct bufferevent *bev, void *arg)
+void buf_write_callback(struct bufferevent *bev,  void *arg)
 {
-  syslog(LOG_INFO, "write call back %d", bev->input);  
-//   struct evbuffer *evreturn;
-//   evreturn = evbuffer_new();
-//   evbuffer_add_printf(evreturn,"how can this happen");
-//   bufferevent_write_buffer(bev,evreturn);
-//   evbuffer_free(evreturn);
+  syslog(LOG_INFO, "write callback %d", counter++);
 }
 
 void buf_error_callback(struct bufferevent *bev, short what, void *arg)
 {
-  printf("error callback %d", what);
+  syslog(LOG_INFO, "error callback %d", counter++);
 }
 
-void accept_callback(int fd, short ev, void *arg)
+void accept_callback(struct evconnlistener *listener, evutil_socket_t fd, struct sockaddr *address, int socklen, void *ctx)
 {
-  int client_fd;
-  struct sockaddr_in client_addr;
-  socklen_t client_len = sizeof(client_addr);
-  struct client *client;
+  struct event_base *base = evconnlistener_get_base(listener);
+  struct bufferevent *bev = bufferevent_socket_new(base, fd, BEV_OPT_CLOSE_ON_FREE);
 
-  client_fd = accept(fd, (struct sockaddr *)&client_addr, &client_len);
-  if (client_fd < 0)
-  {
-    printf("Client: accept() failed");
-    return;
-  }
+  bufferevent_setcb(bev, buf_read_callback, buf_write_callback, NULL, NULL);
 
-  setnonblock(client_fd);
-
-  client = (struct client*)calloc(1, sizeof(*client));
-  if (client == NULL) {
-    // std::cout <<"malloc failed";
-    printf("malloc failure");
-    client->fd = client_fd;
-  }
-
-  client->buf_ev = bufferevent_new(client_fd,
-   buf_read_callback,
-   buf_write_callback,
-   buf_error_callback,
-   client);
-
-  bufferevent_enable(client->buf_ev, EV_READ);
+  bufferevent_enable(bev, EV_READ|EV_WRITE);
 }
 
 int main(void)
 {
-          /* Our process ID and Session ID */
 
-  pid_t pid, sid;
-
-        /* Fork off the parent process */
-  pid = fork();
-  if (pid < 0) {
-    printf("Fork failure\n");
-    exit(EXIT_FAILURE);
-  }
-        /* If we got a good PID, then
-           we can exit the parent process. */
-  if (pid > 0) {
-    printf("fork success\n");
-    exit(EXIT_SUCCESS);
-  }
-
-        /* Change the file mode mask */
-  umask(0);
-
-        /* Open any logs here */
   openlog("demo-daemon-log", LOG_PID|LOG_CONS, LOG_USER);
   syslog(LOG_INFO, "initializing");
 
@@ -151,55 +93,36 @@ int main(void)
         /* The Big Loop */
   // while (1) {
            /* Do some task here ... */
-    syslog(LOG_INFO, "still running");
+  syslog(LOG_INFO, "still running");
 
-    int socketlisten;
-    struct sockaddr_in addresslisten;
-    struct event accept_event;
-    int reuse = 1;
+  struct event_base *base;
+  struct evconnlistener *listener;
+  struct sockaddr_in sin;
 
-    event_init();
+  int port = 8000;
 
-    socketlisten = socket(AF_INET, SOCK_STREAM, 0);
+  base = event_base_new();
+  if (!base) {
+    syslog(LOG_INFO, "Couldn't open event base");
+    exit(EXIT_FAILURE);
+  }
+  syslog(LOG_INFO, "create base event successfully");
+  memset(&sin, 0, sizeof(sin));
+  sin.sin_family = AF_INET;
+  inet_aton("127.0.0.1", &sin.sin_addr);
+  sin.sin_port = htons(port);
 
-    if (socketlisten < 0)
-    {
-      syslog(LOG_INFO, "Failed to create listen socket");
-      return 1;
-    }
-
-    memset(&addresslisten, 0, sizeof(addresslisten));
-
-    addresslisten.sin_family = AF_INET;
-    addresslisten.sin_port = htons(SERVER_PORT);
-  // addresslisten.sin_addr.s_addr = INADDR_ANY;
-    inet_aton("127.0.0.1", &addresslisten.sin_addr);
-
-
-    if (bind(socketlisten, (struct sockaddr *)&addresslisten, sizeof(addresslisten)) < 0)
-    {
-      syslog(LOG_INFO, "Fail to bind");
-      return 1;
-    }
-
-    if (listen(socketlisten, 5) < 0)
-    {
-      syslog(LOG_INFO, "fail to listen socket");
-      return 1;
-    }
-
-    setsockopt(socketlisten, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse));
-
-    setnonblock(socketlisten);
-
-    event_set(&accept_event, socketlisten, EV_READ|EV_PERSIST, accept_callback, NULL);
-    event_add(&accept_event, NULL);
-    syslog(LOG_INFO, "begin dispacth");
-    event_dispatch();
-
-    close(socketlisten);
-    syslog(LOG_INFO, "exit success");
-    closelog();
-    exit(EXIT_SUCCESS);
+  listener = evconnlistener_new_bind(base, accept_callback, NULL, LEV_OPT_CLOSE_ON_FREE, -1, (struct sockaddr*)&sin, sizeof(sin));
+  syslog(LOG_INFO, "binding successfully");
+  if (!listener) {
+    syslog(LOG_INFO, "Couldn't create listener");
+    exit(EXIT_FAILURE);
+  }
+  // evconnlistener_set_error_cb(listener, accept_error_cb);
+  syslog(LOG_INFO, "enter dispatch");
+  event_base_dispatch(base);
+  syslog(LOG_INFO, "exit success");
+  closelog();
+  exit(EXIT_SUCCESS);
   // }
 }
